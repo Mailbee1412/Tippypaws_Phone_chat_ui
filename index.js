@@ -50,6 +50,7 @@ const APP_ALIASES = [
     [/^(telegram|เทเลแกรม)$/i, 'Telegram'],
     [/^(discord|ดิสคอร์ด)$/i, 'Discord'],
     [/^(tiktok|ติ๊กตอก|ติ๊กต๊อก|ติ๊กต็อก)$/i, 'TikTok'],
+    [/^(cg|catta ?gram|cattagram|แคตแกรม|แคทแกรม|แคทต้าแกรม|แคตต้าแกรม)$/i, 'CattaGram'],
 ];
 
 // "ไลน์" / "line" -> "LINE"; empty -> DEFAULT_APP; unknown apps keep their own name
@@ -451,6 +452,7 @@ const APP_STYLES = {
     telegram: { icon: 'fa-paper-plane', color: '#229ed9', bg: 'linear-gradient(150deg, #44c0f5, #1b8bc7)' },
     discord: { icon: 'fa-headset', color: '#5865f2', bg: 'linear-gradient(150deg, #7b86ff, #4752d6)' },
     tiktok: { icon: 'fa-music', color: '#e8315a', bg: 'linear-gradient(150deg, #ff5d7e, #1b1b25)' },
+    cattagram: { icon: 'fa-cat', color: '#ff8a3d', bg: 'linear-gradient(150deg, #ffb35c, #ff6b3d 55%, #e0457b)' },
 };
 
 // -> { icon, color, bg }; unknown apps get a neutral chat icon and null colours (the caller falls back to the accent)
@@ -525,6 +527,7 @@ const STR = {
         setAutoOpen: 'เปิดแชทขึ้นมาเองทันทีที่มีข้อความเข้า (ไม่ต้องกดแบนเนอร์)',
         setFab: 'แสดงปุ่มโทรศัพท์ลอยพร้อมเลขข้อความที่ยังไม่อ่าน',
         setApps: 'แอปแชทที่โชว์บนหน้าจอโฮม (คั่นด้วย , เช่น LINE, IG, SMS)',
+        setHidden: 'ซ่อนแอปเหล่านี้ (คั่นด้วย , เช่น CG) — ไม่แสดงไอคอน แชท และการแจ้งเตือนของแอปนั้น',
         allApps: 'ทุกแอป', openUnread: 'ข้อความที่ยังไม่อ่าน',
         testIncoming: 'ทดสอบสายเรียกเข้า', testNotif: 'ทดสอบแจ้งเตือน', testNotifText: 'นี่คือการแจ้งเตือนตัวอย่าง',
         hint: 'เปิดโทรศัพท์จากเมนูไม้กายสิทธิ์ (🪄) ข้างช่องพิมพ์ → "หน้าจอโทรศัพท์"',
@@ -560,6 +563,7 @@ const STR = {
         setAutoOpen: 'Open the chat right away when a message arrives (no need to tap the banner)',
         setFab: 'Show a floating phone button with the unread count',
         setApps: 'Chat apps shown on the home screen (comma separated, e.g. LINE, IG, SMS)',
+        setHidden: 'Hide these apps (comma separated, e.g. CG) — no icon, chats or notifications for them',
         allApps: 'All apps', openUnread: 'Unread messages',
         testIncoming: 'Test incoming call', testNotif: 'Test notification', testNotifText: 'This is a sample notification',
         hint: 'Open the phone from the wand (🪄) menu next to the input box → "Phone"',
@@ -624,6 +628,7 @@ const DEFAULTS = Object.freeze({
     autoOpen: false,
     fab: true,
     apps: 'LINE, Messenger, SMS, IG',
+    hiddenApps: '',
     accent: '#4a7dfc',
 });
 
@@ -675,10 +680,18 @@ const readIdx = (tid) => Math.max(meta().read[tid] ?? -1, meta().baseline ?? -1)
 /* ------------------------------------------------------------------ */
 let modelCache = null;
 const markDirty = () => { modelCache = null; };
+const hiddenApps = () => new Set(parseAppList(S().hiddenApps, 20).map((a) => a.toLowerCase()));
+
 function model() {
     const chat = ctx().chat ?? [];
     if (!modelCache || modelCache.len !== chat.length) {
-        modelCache = { ...buildModel(chat, { extracted: meta().extracted }), len: chat.length };
+        const built = buildModel(chat, { extracted: meta().extracted });
+        const hide = hiddenApps();
+        if (hide.size) {
+            built.threads = built.threads.filter((th) => !hide.has(th.app.toLowerCase()));
+            built.posts = built.posts.filter((p) => !hide.has(String(p.app ?? '').toLowerCase()));
+        }
+        modelCache = { ...built, len: chat.length };
     }
     return modelCache;
 }
@@ -1116,7 +1129,8 @@ function scheduleRefresh(mode = 'auto') {
 /* ------------------------------------------------------------------ */
 // every chat app we know of: the user's list first, then any app the story has used
 function chatApps() {
-    const apps = parseAppList(S().apps);
+    const hide = hiddenApps();
+    const apps = parseAppList(S().apps).filter((a) => !hide.has(a.toLowerCase()));
     model().threads.forEach((th) => {
         if (!apps.some((a) => sameApp(a, th.app))) apps.push(th.app);
     });
@@ -1942,6 +1956,7 @@ function announce(f, key) {
         incomingCall(f.name);
         return;
     }
+    if (f.app && hiddenApps().has(canonApp(f.app).toLowerCase())) return;
     const contact = contactFor(f.name);
     if (f.t === 'post') {
         deliver({ name: f.name, app: f.app, file: contact.file, text: t('notifPost', f.name), route: { screen: 'social' } });
@@ -2242,6 +2257,7 @@ function buildSettingsPanel() {
             ${[['notifications', 'setNotifications'], ['reminders', 'setReminders'], ['injectContext', 'setInject'], ['autoDetect', 'setDetect'], ['hideTags', 'setChips'], ['autoOpen', 'setAutoOpen'], ['fab', 'setFab'], ['sound', 'setSound']]
                 .map(([k, label]) => `<label class="checkbox_label"><input type="checkbox" data-k="${k}"${s[k] ? ' checked' : ''}><span>${t(label)}</span></label>`).join('')}
             <label class="pcu-set-col"><span>${t('setApps')}</span><input type="text" class="text_pole" data-k="apps" maxlength="120" value="${esc(s.apps)}"></label>
+            <label class="pcu-set-col"><span>${t('setHidden')}</span><input type="text" class="text_pole" data-k="hiddenApps" maxlength="120" value="${esc(s.hiddenApps)}"></label>
             <label class="pcu-set-row"><span>${t('setAccent')}</span><input type="color" data-k="accent" value="${s.accent}"></label>
             <div class="pcu-set-row">
                 <button class="menu_button" type="button" id="pcu_test_ring">${t('testIncoming')}</button>
@@ -2257,7 +2273,7 @@ function buildSettingsPanel() {
             S()[inp.dataset.k] = inp.type === 'checkbox' ? inp.checked : inp.value;
             if (inp.dataset.k === 'accent') applyAccent();
             if (inp.dataset.k === 'hideTags' && inp.checked) scheduleDecorateAll();
-            if (inp.dataset.k === 'apps') refreshScreen();
+            if (inp.dataset.k === 'apps' || inp.dataset.k === 'hiddenApps') { markDirty(); refreshScreen(); updateFab(); }
             if (inp.dataset.k === 'fab') updateFab();
             saveSettings();
         });
