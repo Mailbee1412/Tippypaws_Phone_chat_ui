@@ -7,8 +7,8 @@
     "js": "index.js",
     "css": "style.css",
     "generate_interceptor": "pcuInterceptor",
-    "author": "You",
-    "version": "1.1.1",
-    "homePage": "",
-    "auto_update": false
+    "author": "Mailbee1412",
+    "version": "2.0.0",
+    "homePage": "https://github.com/Mailbee1412/Tippypaws_Phone_chat_ui",
+    "auto_update": true
 }
